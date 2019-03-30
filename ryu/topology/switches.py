@@ -249,6 +249,7 @@ class PortData(object):
         self.lldp_data = lldp_data
         self.timestamp = None
         self.sent = 0
+        self.delay = 0
 
     def lldp_sent(self):
         self.timestamp = time.time()
@@ -767,6 +768,8 @@ class Switches(app_manager.RyuApp):
 
     @set_ev_cls(ofp_event.EventOFPPacketIn, MAIN_DISPATCHER)
     def lldp_packet_in_handler(self, ev):
+        # add receive timestamp
+        recv_timestamp = time.time()
         if not self.link_discovery:
             return
 
@@ -777,7 +780,14 @@ class Switches(app_manager.RyuApp):
             # This handler can receive all the packets which can be
             # not-LLDP packet. Ignore it silently
             return
-
+        
+        # calc the delay of lldp packet
+        for port, port_data in self.ports.items():
+            if src_dpid == port.dpid and src_port_no == port.port_no:
+                send_timestamp = port_data.timestamp
+                if send_timestamp:
+                    port_data.delay = recv_timestamp - send_timestamp
+        
         dst_dpid = msg.datapath.id
         if msg.datapath.ofproto.OFP_VERSION == ofproto_v1_0.OFP_VERSION:
             dst_port_no = msg.in_port

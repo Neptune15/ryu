@@ -127,3 +127,7 @@ CONF.register_cli_opts([
         'frr-version', LooseVersion, default=DEFAULT_ZSERV_FRR_VERSION,
         help='FRRouting version when integrated with FRRouting (e.g., 3.0)'),
 ], group='zapi')
+
+CONF.register_cli_opts([
+    cfg.StrOpt('weight', default='hop',
+               help='weight to get shortest path(hop or delay)')])

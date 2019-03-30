@@ -1,3 +1,4 @@
+from ryu import cfg
 from ryu.base import app_manager
 from ryu.controller import ofp_event
 from ryu.controller.handler import MAIN_DISPATCHER, CONFIG_DISPATCHER
@@ -8,6 +9,7 @@ from ryu.lib.packet import ethernet, arp, ipv4
 
 from network_awareness import NetworkAwareness
 
+CONF = cfg.CONF
 
 class ShortestForward(app_manager.RyuApp):
     OFP_VERSIONS = [ofproto_v1_3.OFP_VERSION]
@@ -18,6 +20,8 @@ class ShortestForward(app_manager.RyuApp):
     def __init__(self, *args, **kwargs):
         super(ShortestForward, self).__init__(*args, **kwargs)
         self.network_awareness = kwargs['network_awareness']
+
+        self.weight = CONF.weight
 
         self.dpid_mac_port = {}
 
@@ -93,7 +97,7 @@ class ShortestForward(app_manager.RyuApp):
     def handle_ipv4(self, msg, src_ip, dst_ip, pkt_type):
         parser = msg.datapath.ofproto_parser
 
-        dpid_path = self.network_awareness.shortest_path(src_ip, dst_ip)
+        dpid_path = self.network_awareness.shortest_path(src_ip, dst_ip, weight=self.weight)
         if not dpid_path:
             return
 
@@ -103,6 +107,13 @@ class ShortestForward(app_manager.RyuApp):
             in_port = self.network_awareness.link_info[(dpid_path[i], dpid_path[i - 1])]
             out_port = self.network_awareness.link_info[(dpid_path[i], dpid_path[i + 1])]
             port_path.append((in_port, dpid_path[i], out_port))
+
+        # calc path delay
+        if self.weight == 'delay':
+            delay = 0
+            for i in range(len(dpid_path) - 1):
+                delay += self.network_awareness.topo_map[dpid_path[i]][dpid_path[i + 1]]['delay']
+            self.logger.info('total path delay: {}'.format(delay))
 
         self.show_path(src_ip, dst_ip, port_path)
 
@@ -125,7 +136,7 @@ class ShortestForward(app_manager.RyuApp):
         match = parser.OFPMatch(
             in_port=in_port, eth_type=pkt_type, ipv4_src=src_ip, ipv4_dst=dst_ip)
         actions = [parser.OFPActionOutput(out_port)]
-        self.add_flow(dp, 1, match, actions)
+        self.add_flow(dp, 1, match, actions, 10, 30)
 
     def show_path(self, src, dst, port_path):
         self.logger.info('path: {} -> {}'.format(src, dst))
