@@ -1,3 +1,4 @@
+from ryu import cfg
 from ryu.base import app_manager
 from ryu.base.app_manager import lookup_service_brick
 from ryu.ofproto import ofproto_v1_3
@@ -19,6 +20,8 @@ import time
 GET_TOPOLOGY_INTERVAL = 2
 SEND_ECHO_REQUEST_INTERVAL = .05
 GET_DELAY_INTERVAL = 2
+
+CONF = cfg.CONF
 
 
 class NetworkAwareness(app_manager.RyuApp):
@@ -93,7 +96,7 @@ class NetworkAwareness(app_manager.RyuApp):
                 # take one ipv4 address as host id
                 if host.ipv4:
                     self.link_info[(host.port.dpid, host.ipv4[0])] = host.port.port_no
-                    self.topo_map.add_edge(host.ipv4[0], host.port.dpid, hop=1, is_host=True)
+                    self.topo_map.add_edge(host.ipv4[0], host.port.dpid, hop=1, delay=0, is_host=True)
             for link in links:
                 # delete ports linked switches
                 self.port_info[link.src.dpid].discard(link.src.port_no)
@@ -104,13 +107,14 @@ class NetworkAwareness(app_manager.RyuApp):
                 self.link_info[(link.dst.dpid, link.src.dpid)] = link.dst.port_no
                 self.topo_map.add_edge(link.src.dpid, link.dst.dpid, hop=1, is_host=False)
 
-            self.show_topo_map()
+            if CONF.weight == 'hop':
+                self.show_topo_map()
             hub.sleep(GET_TOPOLOGY_INTERVAL)
 
     def shortest_path(self, src, dst, weight='hop'):
         try:
             paths = list(nx.shortest_simple_paths(self.topo_map, src, dst, weight=weight))
-            return paths[0]            
+            return paths[0]
         except:
             self.logger.info('host not find/no path')
 
@@ -163,19 +167,19 @@ class NetworkAwareness(app_manager.RyuApp):
     def calc_delay(self):
         for src_dpid, dst_dpid in self.topo_map.edges:
             if self.topo_map[src_dpid][dst_dpid]['is_host']:
-                delay = 0
-            else:
-                try:
-                    lldp_from_delay = self.lldp_delay[(src_dpid, dst_dpid)]
-                    lldp_to_delay = self.lldp_delay[(dst_dpid, src_dpid)]
-                    echo_request_delay = self.echo_delay[src_dpid]
-                    echo_reply_delay = self.echo_delay[dst_dpid]
+                continue
+            try:
+                lldp_from_delay = self.lldp_delay[(src_dpid, dst_dpid)]
+                lldp_to_delay = self.lldp_delay[(dst_dpid, src_dpid)]
+                echo_request_delay = self.echo_delay[src_dpid]
+                echo_reply_delay = self.echo_delay[dst_dpid]
 
-                    delay = max((lldp_from_delay + lldp_to_delay - echo_request_delay - echo_reply_delay) / 2.0, 0)
-                except:
-                    delay = float('inf')
+                delay = max((lldp_from_delay + lldp_to_delay - echo_request_delay - echo_reply_delay) / 2.0, 0)
+            except:
+                delay = float('inf')
             self.topo_map.add_edge(src_dpid, dst_dpid, delay=delay * 1000)  # s -> ms
-        self.show_delay_map()
+        if CONF.weight == 'delay':
+            self.show_delay_map()
 
     def show_delay_map(self):
         self.logger.info('delay map:')
